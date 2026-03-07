@@ -1,5 +1,5 @@
-# Singapore Property Intelligence Tool
-# Render deployment - pinned wheel-compatible versions
+# sg-property-intel backend
+# --prefer-binary in build command forces pip to use wheels, not source
 
 fastapi==0.109.0
 uvicorn[standard]==0.27.0
@@ -8,15 +8,9 @@ requests==2.31.0
 beautifulsoup4==4.12.3
 lxml==5.1.0
 python-dateutil==2.8.2
-
-# Force older pydantic that definitely has wheels for most platforms
 pydantic==2.5.3
+pydantic-core==2.14.6
 pydantic-settings==2.1.0
-
 python-multipart==0.0.6
 cachetools==5.3.2
 brotli==1.1.0
-
-# Dev
-pytest==7.4.4
-httpx==0.26.0
