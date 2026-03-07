@@ -84,6 +84,32 @@ def normalise_project_name(name: str) -> str:
     return name.strip().upper()
 
 
+def resolve_project_name(name: str, db) -> str:
+    """
+    Resolve a partial or full project name to the exact name stored in the DB.
+    Tries exact match first, then LIKE contains, returns best match.
+    """
+    from models.database import Transaction
+    upper = name.strip().upper()
+
+    # 1. Exact match
+    exact = db.query(Transaction.project_name).filter(
+        Transaction.project_name == upper
+    ).first()
+    if exact:
+        return exact[0]
+
+    # 2. Contains match (e.g. "interlace" → "THE INTERLACE")
+    like = db.query(Transaction.project_name).filter(
+        Transaction.project_name.ilike(f"%{upper}%")
+    ).first()
+    if like:
+        return like[0]
+
+    # 3. No match — return normalised name (will trigger ingest path)
+    return upper
+
+
 def parse_floor_band(floor_str: str) -> str:
     if not floor_str:
         return "unknown"
