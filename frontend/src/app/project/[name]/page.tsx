@@ -26,21 +26,37 @@ export default function ProjectPage() {
     async function loadData() {
       setLoading(true);
       setError("");
-      
+
+      const decodedName = decodeURIComponent(projectName);
+
       try {
-        const [analyticsData, txnData, rentData, yieldData] = await Promise.all([
-          fetchAnalytics(projectName),
-          fetchTransactions(projectName),
-          fetchRentals(projectName),
-          fetchYield(projectName),
+        // Use allSettled so a single failing endpoint (e.g. yield with no data)
+        // doesn't crash the entire page
+        const [analyticsResult, txnResult, rentResult, yieldResult] = await Promise.allSettled([
+          fetchAnalytics(decodedName),
+          fetchTransactions(decodedName),
+          fetchRentals(decodedName),
+          fetchYield(decodedName),
         ]);
-        
+
+        // Analytics is required — if it fails, project doesn't exist or DB is empty
+        if (analyticsResult.status === "rejected") {
+          // Auto-trigger ingest and retry once after delay
+          await fetch(`${process.env.NEXT_PUBLIC_API_BASE_URL || 'https://sg-property-intel.onrender.com'}/admin/ingest/${encodeURIComponent(decodedName)}`, { method: 'POST' });
+          setError(`No data found for "${decodedName}". Ingestion triggered — please try again in 60 seconds.`);
+          setLoading(false);
+          return;
+        }
+
+        const analyticsData = analyticsResult.value;
         setAnalytics(analyticsData.summary);
-        setTransactions(txnData.data || []);
-        setRentals(rentData.data || []);
-        setYields(yieldData.yield_by_size_band || []);
         setPsfTrend(analyticsData.psf_trend || []);
         setRentalTrend(analyticsData.rental_trend || []);
+
+        if (txnResult.status === "fulfilled") setTransactions(txnResult.value.data || []);
+        if (rentResult.status === "fulfilled") setRentals(rentResult.value.data || []);
+        if (yieldResult.status === "fulfilled") setYields(yieldResult.value.yield_by_size_band || []);
+
       } catch (e: any) {
         setError(e.message || "Failed to load data");
       } finally {

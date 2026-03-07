@@ -91,8 +91,9 @@ def get_yield(project_name: str, db: Session = Depends(get_db)):
     normalized_name = normalise_project_name(project_name)
     transactions = db.query(Transaction).filter(Transaction.project_name == normalized_name).all()
     rentals = db.query(Rental).filter(Rental.project_name == normalized_name).all()
+    # Return empty array (200) instead of 404 — frontend handles gracefully
     if not transactions or not rentals:
-        raise HTTPException(status_code=404, detail="Insufficient data for yield calculation")
+        return {"project_name": normalized_name, "yield_by_size_band": [], "note": "Insufficient data for yield calculation"}
     txn_dicts = [{"transacted_price": t.transacted_price, "size_band": t.size_band} for t in transactions]
     rent_dicts = [{"monthly_rent": r.monthly_rent, "size_band": r.size_band} for r in rentals]
     yield_data = compute_yield_by_size_band(txn_dicts, rent_dicts)
