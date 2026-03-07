@@ -57,6 +57,28 @@ def health():
     return {"status": "healthy"}
 
 
+@app.get("/search")
+def search_projects(q: str = ""):
+    """Search projects by partial name. Returns matching project names from DB."""
+    from sqlalchemy import func
+    if len(q.strip()) < 2:
+        return {"results": []}
+    upper_q = q.strip().upper()
+    db = SessionLocal()
+    try:
+        rows = (
+            db.query(Transaction.project_name, func.count(Transaction.id).label("n"))
+            .filter(Transaction.project_name.ilike(f"%{upper_q}%"))
+            .group_by(Transaction.project_name)
+            .order_by(func.count(Transaction.id).desc())
+            .limit(10)
+            .all()
+        )
+        return {"results": [{"name": r[0], "transactions": r[1]} for r in rows]}
+    finally:
+        db.close()
+
+
 def _run_ingest(project_name: str):
     """Background ingest task - fetches URA data and stores in DB."""
     from scrapers.transactions import fetch_transactions
