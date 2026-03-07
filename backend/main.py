@@ -130,10 +130,19 @@ def _run_ingest(project_name: str):
 
 
 @app.post("/admin/ingest/{project_name}")
-def ingest_project(project_name: str, background_tasks: BackgroundTasks):
-    """Trigger data ingestion for a project. Runs in background."""
-    background_tasks.add_task(_run_ingest, project_name)
-    return {"status": "ingestion started", "project": project_name}
+def ingest_project(project_name: str):
+    """Trigger data ingestion for a project. Runs synchronously."""
+    try:
+        _run_ingest(project_name)
+        db = SessionLocal()
+        from sqlalchemy import func
+        txn_count = db.query(func.count(Transaction.id)).filter(
+            Transaction.project_name == project_name
+        ).scalar()
+        db.close()
+        return {"status": "success", "project": project_name, "transactions": txn_count}
+    except Exception as e:
+        return {"status": "error", "project": project_name, "error": str(e)}
 
 
 @app.post("/admin/ingest-sync/{project_name}")
