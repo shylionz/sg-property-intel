@@ -114,6 +114,22 @@ def ingest_project(project_name: str, background_tasks: BackgroundTasks):
     return {"status": "ingestion started", "project": project_name}
 
 
+@app.post("/admin/ingest-sync/{project_name}")
+def ingest_project_sync(project_name: str):
+    """Synchronous ingest — returns result or error directly. For debugging."""
+    try:
+        _run_ingest(project_name)
+        db = SessionLocal()
+        from sqlalchemy import func
+        txn_count = db.query(func.count()).filter(
+            Transaction.project_name == project_name
+        ).scalar()
+        db.close()
+        return {"status": "success", "project": project_name, "transactions": txn_count}
+    except Exception as e:
+        return {"status": "error", "project": project_name, "error": str(e)}
+
+
 @app.get("/admin/projects")
 def list_projects():
     """List all projects currently in the database."""
