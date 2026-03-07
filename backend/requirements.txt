@@ -1,5 +1,5 @@
-# Singapore Property Transaction Intelligence Tool
-# Fixed for Render deployment (Python 3.11 + wheel compatibility)
+# Singapore Property Intelligence Tool
+# Fixed for Render - wheel-only dependencies
 
 fastapi==0.109.0
 uvicorn[standard]==0.27.0
@@ -8,8 +8,12 @@ requests==2.31.0
 beautifulsoup4==4.12.3
 lxml==5.1.0
 python-dateutil==2.8.2
-pydantic==2.5.3
-pydantic-settings==2.1.0
+
+# Pin pydantic to version with pre-built wheels for all platforms
+pydantic==2.10.4
+pydantic-core==2.27.2  # Has wheels for Python 3.11
+
+pydantic-settings==2.7.1
 python-multipart==0.0.6
 cachetools==5.3.2
 brotli==1.1.0
