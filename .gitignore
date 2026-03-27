@@ -32,3 +32,7 @@ Thumbs.db
 # Logs
 *.log
 npm-debug.log*
+FRONTEND_RESTORE_REPORT.md
+backend/package.json
+backend/package-lock.json
+backend/server.js

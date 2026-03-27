@@ -10,9 +10,12 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from fastapi import FastAPI, BackgroundTasks, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from typing import Optional
 
 from models.database import init_db, SessionLocal, Transaction, Rental
 from api import project, district
+from utils.project_index import search_projects as search_project_index, is_project_valid
+from scrapers.project_fetcher import fetch_project_data
 
 # Create database on startup
 init_db()
@@ -48,6 +51,8 @@ def root():
             "analytics": "/project/{project_name}/analytics",
             "yield": "/project/{project_name}/yield",
             "district_projects": "/district/{district_code}/projects",
+            "search": "/search?q={query}",
+            "project_valid": "/project/{project_name}/valid"
         }
     }
 
@@ -59,22 +64,59 @@ def health():
 
 @app.get("/search")
 def search_projects(q: str = ""):
-    """Search projects by partial name. Returns matching project names from DB."""
-    from sqlalchemy import func
+    """Search projects by partial name. Returns matching project names from index."""
     if len(q.strip()) < 2:
         return {"results": []}
-    upper_q = q.strip().upper()
+    
+    # First try searching in the database
+    from sqlalchemy import func
     db = SessionLocal()
     try:
         rows = (
             db.query(Transaction.project_name, func.count(Transaction.id).label("n"))
-            .filter(Transaction.project_name.ilike(f"%{upper_q}%"))
+            .filter(Transaction.project_name.ilike(f"%{q.strip().upper()}%"))
             .group_by(Transaction.project_name)
             .order_by(func.count(Transaction.id).desc())
             .limit(10)
             .all()
         )
-        return {"results": [{"name": r[0], "transactions": r[1]} for r in rows]}
+        db_results = [{"name": r[0], "transactions": r[1]} for r in rows]
+        
+        # If we found results in DB, return those
+        if db_results:
+            return {"results": db_results}
+            
+        # Otherwise, search in project index
+        index_results = search_project_index(q, limit=10)
+        return {"results": [{"name": name, "transactions": 0} for name in index_results]}
+    finally:
+        db.close()
+
+
+@app.get("/project/{project_name}/valid")
+def validate_project(project_name: str):
+    """Check if a project name is valid."""
+    db = SessionLocal()
+    try:
+        # First check if project exists in database
+        count = db.query(Transaction).filter(Transaction.project_name == project_name).count()
+        if count > 0:
+            return {"valid": True, "in_database": True}
+            
+        # Then check in project index
+        valid = is_project_valid(project_name)
+        if valid:
+            return {"valid": True, "in_database": False}
+        
+        # If not in index, check if we can fetch it (try a quick fetch)
+        try:
+            # Try to fetch just enough to validate it exists
+            temp_db = SessionLocal()
+            result = fetch_project_data(project_name, temp_db)
+            temp_db.close()
+            return {"valid": True, "in_database": False}
+        except:
+            return {"valid": False, "in_database": False}
     finally:
         db.close()
 
@@ -173,5 +215,36 @@ def list_projects():
             .all()
         )
         return {"projects": [{"name": r[0], "transactions": r[1]} for r in rows]}
+    finally:
+        db.close()
+
+
+@app.get("/project/{project_name}/data")
+def get_project_data(project_name: str):
+    """Get project data, fetching it on-demand if not in database."""
+    db = SessionLocal()
+    try:
+        # Check if project data exists
+        transaction_count = db.query(Transaction).filter(Transaction.project_name == project_name).count()
+        rental_count = db.query(Rental).filter(Rental.project_name == project_name).count()
+        
+        if transaction_count > 0 or rental_count > 0:
+            # Data exists, return it
+            return {
+                "project": project_name,
+                "data_exists": True,
+                "transactions": transaction_count,
+                "rentals": rental_count
+            }
+        else:
+            # Data doesn't exist, fetch it on-demand
+            result = fetch_project_data(project_name, db)
+            return {
+                "project": project_name,
+                "data_exists": True,
+                "transactions": result["transactions"],
+                "rentals": result["rentals"],
+                "message": "Data fetched on-demand"
+            }
     finally:
         db.close()

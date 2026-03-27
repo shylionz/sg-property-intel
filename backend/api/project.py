@@ -15,13 +15,20 @@ from analytics.psf import (
 )
 from analytics.yield_engine import compute_yield_by_size_band
 from utils.parsers import normalise_project_name, resolve_project_name
+from scrapers.project_fetcher import fetch_project_data
 
 router = APIRouter(prefix="/project", tags=["project"])
 
 
 @router.get("/{project_name}/transactions")
 def get_transactions(project_name: str, page: int = Query(0, ge=0), per_page: int = Query(20, ge=1, le=100), db: Session = Depends(get_db)):
+    # Try to fetch project data if not exists
     normalized_name = resolve_project_name(project_name, db)
+    count = db.query(Transaction).filter(Transaction.project_name == normalized_name).count()
+    if count == 0:
+        # Fetch data on-demand
+        fetch_project_data(normalized_name, db)
+    
     query = db.query(Transaction).filter(Transaction.project_name == normalized_name)
     total = query.count()
     transactions = query.order_by(Transaction.sale_date_parsed.desc()).offset(page * per_page).limit(per_page).all()
@@ -48,7 +55,13 @@ def get_transactions(project_name: str, page: int = Query(0, ge=0), per_page: in
 
 @router.get("/{project_name}/rentals")
 def get_rentals(project_name: str, page: int = Query(0, ge=0), per_page: int = Query(20, ge=1, le=100), db: Session = Depends(get_db)):
+    # Try to fetch project data if not exists
     normalized_name = resolve_project_name(project_name, db)
+    count = db.query(Rental).filter(Rental.project_name == normalized_name).count()
+    if count == 0:
+        # Fetch data on-demand
+        fetch_project_data(normalized_name, db)
+    
     query = db.query(Rental).filter(Rental.project_name == normalized_name)
     total = query.count()
     rentals = query.order_by(Rental.lease_date_parsed.desc()).offset(page * per_page).limit(per_page).all()
@@ -72,6 +85,13 @@ def get_rentals(project_name: str, page: int = Query(0, ge=0), per_page: int = Q
 @router.get("/{project_name}/analytics")
 def get_analytics(project_name: str, db: Session = Depends(get_db)):
     normalized_name = resolve_project_name(project_name, db)
+    # Check if data exists, if not fetch it
+    txn_count = db.query(Transaction).filter(Transaction.project_name == normalized_name).count()
+    rent_count = db.query(Rental).filter(Rental.project_name == normalized_name).count()
+    if txn_count == 0 and rent_count == 0:
+        # Fetch data on-demand
+        fetch_project_data(normalized_name, db)
+    
     transactions = db.query(Transaction).filter(Transaction.project_name == normalized_name).all()
     rentals = db.query(Rental).filter(Rental.project_name == normalized_name).all()
     if not transactions and not rentals:
@@ -89,6 +109,13 @@ def get_analytics(project_name: str, db: Session = Depends(get_db)):
 @router.get("/{project_name}/yield")
 def get_yield(project_name: str, db: Session = Depends(get_db)):
     normalized_name = resolve_project_name(project_name, db)
+    # Check if data exists, if not fetch it
+    txn_count = db.query(Transaction).filter(Transaction.project_name == normalized_name).count()
+    rent_count = db.query(Rental).filter(Rental.project_name == normalized_name).count()
+    if txn_count == 0 and rent_count == 0:
+        # Fetch data on-demand
+        fetch_project_data(normalized_name, db)
+    
     transactions = db.query(Transaction).filter(Transaction.project_name == normalized_name).all()
     rentals = db.query(Rental).filter(Rental.project_name == normalized_name).all()
     # Return empty array (200) instead of 404 — frontend handles gracefully
