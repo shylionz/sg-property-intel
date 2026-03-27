@@ -41,9 +41,37 @@ export default function ProjectPage() {
 
         // Analytics is required — if it fails, project doesn't exist or DB is empty
         if (analyticsResult.status === "rejected") {
-          // Auto-trigger ingest and retry once after delay
+          // Auto-trigger ingest and retry with loading spinner
           await fetch(`${process.env.NEXT_PUBLIC_API_BASE_URL || 'https://sg-property-intel.onrender.com'}/admin/ingest/${encodeURIComponent(decodedName)}`, { method: 'POST' });
-          setError(`No data found for "${decodedName}". Ingestion triggered — please try again in 60 seconds.`);
+          // Wait 30 seconds then retry automatically
+          await new Promise(resolve => setTimeout(resolve, 30000));
+          const retryResult = await fetchAnalytics(decodedName).catch(() => null);
+          if (!retryResult) {
+            // Second retry after another 30 seconds
+            await new Promise(resolve => setTimeout(resolve, 30000));
+            const retryResult2 = await fetchAnalytics(decodedName).catch(() => null);
+            if (!retryResult2) {
+              setError(`Could not load data for "${decodedName}" after ingestion. Please try again later.`);
+              setLoading(false);
+              return;
+            }
+            setAnalytics(retryResult2.summary);
+            setPsfTrend(retryResult2.psf_trend || []);
+            setRentalTrend(retryResult2.rental_trend || []);
+          } else {
+            setAnalytics(retryResult.summary);
+            setPsfTrend(retryResult.psf_trend || []);
+            setRentalTrend(retryResult.rental_trend || []);
+          }
+          // Re-fetch transactions, rentals, yield after successful ingestion
+          const [txn2, rent2, yield2] = await Promise.allSettled([
+            fetchTransactions(decodedName),
+            fetchRentals(decodedName),
+            fetchYield(decodedName),
+          ]);
+          if (txn2.status === "fulfilled") setTransactions(txn2.value.data || []);
+          if (rent2.status === "fulfilled") setRentals(rent2.value.data || []);
+          if (yield2.status === "fulfilled") setYields(yield2.value.yield_by_size_band || []);
           setLoading(false);
           return;
         }
