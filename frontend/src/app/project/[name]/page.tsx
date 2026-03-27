@@ -72,7 +72,7 @@ export default function ProjectPage() {
       <div className="min-h-screen bg-gray-50 flex items-center justify-center">
         <div className="text-center">
           <div className="w-12 h-12 border-4 border-blue-600 border-t-transparent rounded-full animate-spin mx-auto mb-4"></div>
-          <p className="text-gray-600">Loading {projectName}...</p>
+          <p className="text-gray-600">Loading {decodeURIComponent(projectName)}...</p>
         </div>
       </div>
     );
@@ -96,7 +96,7 @@ export default function ProjectPage() {
         <div className="max-w-7xl mx-auto px-6 py-4">
           <div className="flex items-center justify-between">
             <Link href="/" className="text-gray-600 hover:text-gray-900">← Search</Link>
-            <h1 className="text-xl font-bold text-gray-900">{projectName}</h1>
+            <h1 className="text-xl font-bold text-gray-900">{decodeURIComponent(projectName)}</h1>
             <div className="text-sm text-gray-500">{analytics?.postal_district ? `District ${analytics.postal_district}` : ""}</div>
           </div>
         </div>
