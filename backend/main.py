@@ -64,11 +64,10 @@ def health():
 
 @app.get("/search")
 def search_projects(q: str = ""):
-    """Search projects by partial name. Returns matching project names from index."""
+    """Search projects by partial name. Returns matching project names from DB + index."""
     if len(q.strip()) < 2:
         return {"results": []}
     
-    # First try searching in the database
     from sqlalchemy import func
     db = SessionLocal()
     try:
@@ -80,15 +79,18 @@ def search_projects(q: str = ""):
             .limit(10)
             .all()
         )
-        db_results = [{"name": r[0], "transactions": r[1]} for r in rows]
+        db_results = {r[0]: r[1] for r in rows}
         
-        # If we found results in DB, return those
-        if db_results:
-            return {"results": db_results}
-            
-        # Otherwise, search in project index
-        index_results = search_project_index(q, limit=10)
-        return {"results": [{"name": name, "transactions": 0} for name in index_results]}
+        index_results = search_project_index(q, limit=20)
+        
+        merged = []
+        for name, count in db_results.items():
+            merged.append({"name": name, "transactions": count})
+        for name in index_results:
+            if name not in db_results:
+                merged.append({"name": name, "transactions": 0})
+        
+        return {"results": merged[:10]}
     finally:
         db.close()
 
