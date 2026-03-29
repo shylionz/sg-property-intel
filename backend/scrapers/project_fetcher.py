@@ -19,19 +19,6 @@ def fetch_project_data(project_name: str, db: Session) -> Dict:
     Returns a dict with fetch status and counts.
     """
     try:
-        # Check if project data already exists
-        existing_txns = db.query(Transaction).filter(Transaction.project_name == project_name).count()
-        existing_rents = db.query(Rental).filter(Rental.project_name == project_name).count()
-        
-        if existing_txns > 0 or existing_rents > 0:
-            # Data already exists, return counts
-            return {
-                "project": project_name,
-                "transactions": existing_txns,
-                "rentals": existing_rents,
-                "status": "cached"
-            }
-        
         # Fetch new data
         txns = fetch_transactions(
             project_name, year_from=datetime.now().year - 5, month_from=1, year_to=datetime.now().year, month_to=12, max_pages=50
