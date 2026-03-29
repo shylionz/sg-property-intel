@@ -4,6 +4,7 @@ FastAPI application entry point.
 """
 import os
 import sys
+from datetime import datetime
 
 # Add the backend directory to the path
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -131,10 +132,10 @@ def _run_ingest(project_name: str):
     db = SessionLocal()
     try:
         txns = fetch_transactions(
-            project_name, year_from=2024, month_from=1, year_to=2026, month_to=12, max_pages=15
+            project_name, year_from=datetime.now().year - 5, month_from=1, year_to=datetime.now().year, month_to=12, max_pages=50
         )
         rents = fetch_rentals(
-            project_name, year_from=2024, month_from=1, year_to=2026, month_to=12, max_pages=15
+            project_name, year_from=datetime.now().year - 5, month_from=1, year_to=datetime.now().year, month_to=12, max_pages=50
         )
 
         # Clear existing data for this project before re-inserting

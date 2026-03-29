@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, useMemo } from "react";
 import { useParams, useRouter } from "next/navigation";
 import Link from "next/link";
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from "recharts";
@@ -19,6 +19,43 @@ export default function ProjectPage() {
   const [yields, setYields] = useState<YieldBand[]>([]);
   const [psfTrend, setPsfTrend] = useState<TrendPoint[]>([]);
   const [rentalTrend, setRentalTrend] = useState<TrendPoint[]>([]);
+  const [dateFrom, setDateFrom] = useState("");
+  const [dateTo, setDateTo] = useState("");
+
+  useEffect(() => {
+    if (psfTrend.length > 0 || rentalTrend.length > 0) {
+      const allMonths = [...psfTrend.map(p => p.month), ...rentalTrend.map(r => r.month)].sort();
+      if (allMonths.length > 0 && !dateFrom) setDateFrom(allMonths[0]);
+      if (allMonths.length > 0 && !dateTo) setDateTo(allMonths[allMonths.length - 1]);
+    }
+  }, [psfTrend, rentalTrend]);
+
+  const monthOptions = useMemo(() => {
+    const allMonths = new Set([...psfTrend.map(p => p.month), ...rentalTrend.map(r => r.month)]);
+    return Array.from(allMonths).sort();
+  }, [psfTrend, rentalTrend]);
+
+  const filteredPsfTrend = useMemo(() => {
+    return psfTrend.filter(p => (!dateFrom || p.month >= dateFrom) && (!dateTo || p.month <= dateTo));
+  }, [psfTrend, dateFrom, dateTo]);
+
+  const filteredRentalTrend = useMemo(() => {
+    return rentalTrend.filter(r => (!dateFrom || r.month >= dateFrom) && (!dateTo || r.month <= dateTo));
+  }, [rentalTrend, dateFrom, dateTo]);
+
+  const filteredTransactions = useMemo(() => {
+    return transactions.filter(t => {
+      const m = (t.sale_date_parsed || t.sale_date || "").slice(0, 7);
+      return (!dateFrom || m >= dateFrom) && (!dateTo || m <= dateTo);
+    });
+  }, [transactions, dateFrom, dateTo]);
+
+  const filteredRentals = useMemo(() => {
+    return rentals.filter(r => {
+      const m = (r.lease_date_parsed || r.lease_date || "").slice(0, 7);
+      return (!dateFrom || m >= dateFrom) && (!dateTo || m <= dateTo);
+    });
+  }, [rentals, dateFrom, dateTo]);
 
   useEffect(() => {
     if (!projectName) return;
@@ -131,6 +168,21 @@ export default function ProjectPage() {
       </header>
 
       <main className="max-w-7xl mx-auto px-6 py-8">
+        {/* Date Range Picker */}
+        <div className="bg-white p-4 rounded-lg shadow-sm border border-gray-200 mb-6">
+          <div className="flex items-center gap-4 flex-wrap">
+            <span className="text-sm font-medium text-gray-700">Date Range:</span>
+            <select value={dateFrom} onChange={(e) => setDateFrom(e.target.value)} className="px-3 py-2 border border-gray-300 rounded-md text-sm bg-white">
+              {monthOptions.map(m => (<option key={m} value={m}>{m}</option>))}
+            </select>
+            <span className="text-gray-400">to</span>
+            <select value={dateTo} onChange={(e) => setDateTo(e.target.value)} className="px-3 py-2 border border-gray-300 rounded-md text-sm bg-white">
+              {monthOptions.map(m => (<option key={m} value={m}>{m}</option>))}
+            </select>
+            <button onClick={() => { if (monthOptions.length > 0) { setDateFrom(monthOptions[0]); setDateTo(monthOptions[monthOptions.length - 1]); }}} className="px-3 py-2 text-xs bg-gray-100 text-gray-600 rounded hover:bg-gray-200">Reset</button>
+            <span className="text-xs text-gray-400">{filteredTransactions.length} txns · {filteredRentals.length} rentals in range</span>
+          </div>
+        </div>
         {/* Summary Cards */}
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-8">
           <SummaryCard label="Median PSF" value={analytics?.median_psf ? `$${analytics.median_psf}` : "—"} subtext={`${analytics?.total_transactions || 0} transactions`} />
@@ -145,7 +197,7 @@ export default function ProjectPage() {
             <h2 className="text-lg font-semibold mb-4">PSF Trend</h2>
             {psfTrend.length > 0 ? (
               <ResponsiveContainer width="100%" height={250}>
-                <LineChart data={psfTrend}>
+                <LineChart data={filteredPsfTrend}>
                   <CartesianGrid strokeDasharray="3 3" stroke="#eee" />
                   <XAxis dataKey="month" tick={{ fontSize: 12 }} />
                   <YAxis tick={{ fontSize: 12 }} />
@@ -162,7 +214,7 @@ export default function ProjectPage() {
             <h2 className="text-lg font-semibold mb-4">Rental Trend</h2>
             {rentalTrend.length > 0 ? (
               <ResponsiveContainer width="100%" height={250}>
-                <LineChart data={rentalTrend}>
+                <LineChart data={filteredRentalTrend}>
                   <CartesianGrid strokeDasharray="3 3" stroke="#eee" />
                   <XAxis dataKey="month" tick={{ fontSize: 12 }} />
                   <YAxis tick={{ fontSize: 12 }} />
@@ -218,7 +270,7 @@ export default function ProjectPage() {
 
         {/* Transaction Table */}
         <div className="bg-white p-6 rounded-lg shadow-sm border border-gray-200 mb-8">
-          <h2 className="text-lg font-semibold mb-4">Recent Transactions ({transactions.length})</h2>
+          <h2 className="text-lg font-semibold mb-4">Transactions ({filteredTransactions.length})</h2>
           <div className="overflow-x-auto">
             <table className="w-full text-sm">
               <thead>
@@ -232,7 +284,7 @@ export default function ProjectPage() {
                 </tr>
               </thead>
               <tbody>
-                {transactions.slice(0, 20).map((t, i) => (
+                {filteredTransactions.slice(0, 50).map((t, i) => (
                   <tr key={i} className="border-b border-gray-100 hover:bg-gray-50">
                     <td className="py-2 px-3">{t.sale_date}</td>
                     <td className="py-2 px-3 text-right">${t.transacted_price.toLocaleString()}</td>
@@ -249,7 +301,7 @@ export default function ProjectPage() {
 
         {/* Rental Table */}
         <div className="bg-white p-6 rounded-lg shadow-sm border border-gray-200">
-          <h2 className="text-lg font-semibold mb-4">Recent Rentals ({rentals.length})</h2>
+          <h2 className="text-lg font-semibold mb-4">Rentals ({filteredRentals.length})</h2>
           <div className="overflow-x-auto">
             <table className="w-full text-sm">
               <thead>
@@ -261,7 +313,7 @@ export default function ProjectPage() {
                 </tr>
               </thead>
               <tbody>
-                {rentals.slice(0, 20).map((r, i) => (
+                {filteredRentals.slice(0, 50).map((r, i) => (
                   <tr key={i} className="border-b border-gray-100 hover:bg-gray-50">
                     <td className="py-2 px-3">{r.lease_date}</td>
                     <td className="py-2 px-3 text-right">${r.monthly_rent.toLocaleString()}/mo</td>

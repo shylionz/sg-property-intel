@@ -2,6 +2,7 @@
 Project fetcher for on-demand data fetching.
 """
 import time
+from datetime import datetime
 from typing import Dict, List, Optional
 from fastapi import HTTPException
 from sqlalchemy.orm import Session
@@ -33,10 +34,10 @@ def fetch_project_data(project_name: str, db: Session) -> Dict:
         
         # Fetch new data
         txns = fetch_transactions(
-            project_name, year_from=2024, month_from=1, year_to=2026, month_to=12, max_pages=15
+            project_name, year_from=datetime.now().year - 5, month_from=1, year_to=datetime.now().year, month_to=12, max_pages=50
         )
         rents = fetch_rentals(
-            project_name, year_from=2024, month_from=1, year_to=2026, month_to=12, max_pages=15
+            project_name, year_from=datetime.now().year - 5, month_from=1, year_to=datetime.now().year, month_to=12, max_pages=50
         )
         
         # Clear existing data for this project before re-inserting
