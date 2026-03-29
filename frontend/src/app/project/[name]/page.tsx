@@ -161,7 +161,7 @@ export default function ProjectPage() {
         <div className="max-w-7xl mx-auto px-6 py-4">
           <div className="flex items-center justify-between">
             <Link href="/" className="text-gray-600 hover:text-gray-900">← Search</Link>
-            <h1 className="text-xl font-bold text-gray-900">{decodeURIComponent(projectName)}</h1>
+            <div className="flex items-center gap-2"><h1 className="text-xl font-bold text-gray-900">{decodeURIComponent(projectName)}</h1><button onClick={async () => { setLoading(true); await fetch(`${process.env.NEXT_PUBLIC_API_BASE_URL || "https://sg-property-intel.onrender.com"}/admin/ingest/${encodeURIComponent(decodeURIComponent(projectName))}`, { method: "POST" }); window.location.reload(); }} className="px-3 py-1 text-xs bg-blue-100 text-blue-700 rounded hover:bg-blue-200">↻ Refresh</button></div>
             <div className="text-sm text-gray-500">{analytics?.postal_district ? `District ${analytics.postal_district}` : ""}</div>
           </div>
         </div>
