@@ -141,6 +141,35 @@ export default function Home() {
         <p className="text-center text-sm text-gray-400 mt-4">
           Try: The Interlace · The Sail @ Marina Bay
         </p>
+        
+        {/* District Browse */}
+        <div className="mt-8 w-full">
+          <h2 className="text-sm font-medium text-gray-500 mb-3 text-center">Browse by District</h2>
+          <div className="grid grid-cols-2 gap-2">
+            {[
+              {code: "D01", area: "Raffles Place, Cecil, Marina"},
+              {code: "D02", area: "Anson, Tanjong Pagar"},
+              {code: "D03", area: "Queenstown, Tiong Bahru"},
+              {code: "D04", area: "Telok Blangah, Harbourfront"},
+              {code: "D05", area: "Pasir Panjang, Clementi"},
+              {code: "D09", area: "Orchard, River Valley"},
+              {code: "D10", area: "Bukit Timah, Holland"},
+              {code: "D11", area: "Novena, Thomson"},
+              {code: "D12", area: "Toa Payoh, Serangoon"},
+              {code: "D14", area: "Geylang, Eunos"},
+              {code: "D15", area: "Katong, Joo Chiat"},
+              {code: "D19", area: "Hougang, Punggol"},
+              {code: "D20", area: "Bishan, Ang Mo Kio"},
+              {code: "D21", area: "Upper Bukit Timah"},
+              {code: "D23", area: "Hillview, Bukit Panjang"},
+              {code: "D27", area: "Yishun, Sembawang"},
+            ].map(d => (
+              <a key={d.code} href={`/district/${d.code}`} className="px-3 py-2 text-xs bg-gray-100 rounded hover:bg-blue-50 hover:text-blue-700 text-gray-600 text-center">
+                <span className="font-medium">{d.code}</span> {d.area}
+              </a>
+            ))}
+          </div>
+        </div>
       </div>
     </div>
   );

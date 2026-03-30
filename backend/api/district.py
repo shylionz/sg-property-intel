@@ -1,40 +1,42 @@
-"""
-API routes for district data.
-"""
+"""District browsing endpoints."""
+import json
 import os
-import sys
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-
 from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
-from sqlalchemy import func
+from sqlalchemy import distinct, func
+from models.database import Transaction, Rental, get_db
 
-from models.database import get_db, Transaction
+router = APIRouter()
 
-router = APIRouter(prefix="/district", tags=["district"])
+DISTRICTS_FILE = "data/districts.json"
 
+def load_districts():
+    if os.path.exists(DISTRICTS_FILE):
+        with open(DISTRICTS_FILE) as f:
+            return json.load(f)
+    return {}
 
-@router.get("/{district_code}/projects")
+@router.get("/districts")
+def list_districts():
+ """List all 28 postal districts."""
+ return {"districts": load_districts()}
+
+@router.get("/districts/{district_code}/projects")
 def get_district_projects(district_code: str, db: Session = Depends(get_db)):
-    projects = (
-        db.query(
-            Transaction.project_name,
-            func.count(Transaction.id).label("transaction_count"),
-            func.min(Transaction.sale_date_parsed).label("latest_sale_date"),
-            func.avg(Transaction.price_psf).label("avg_psf")
-        )
-        .filter(Transaction.postal_district == district_code)
-        .group_by(Transaction.project_name)
-        .order_by(func.count(Transaction.id).desc())
-        .limit(50)
-        .all()
-    )
-    data = []
-    for p in projects:
-        data.append({
-            "project_name": p.project_name,
-            "transaction_count": p.transaction_count,
-            "latest_sale_date": p.latest_sale_date.isoformat() if p.latest_sale_date else None,
-            "median_psf": round(p.avg_psf) if p.avg_psf else None
-        })
-    return {"district": district_code, "projects": data}
+ """Get all projects in a district from ingested data."""
+ code = district_code.replace("D", "").zfill(2)
+ rows = (
+ db.query(
+ Transaction.project_name,
+ func.count(Transaction.id).label("n"),
+ func.max(Transaction.sale_date_parsed).label("last_sale")
+ )
+ .filter(Transaction.postal_district == code)
+ .group_by(Transaction.project_name)
+ .order_by(func.count(Transaction.id).desc())
+ .all()
+ )
+ projects = [{"name": r[0], "transactions": r[1], "last_sale": str(r[2]) if r[2] else None} for r in rows]
+ districts = load_districts()
+ area_name = districts.get(f"D{code}", districts.get(district_code, ""))
+ return {"district": f"D{code}", "area": area_name, "projects": projects}
