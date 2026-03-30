@@ -40,3 +40,23 @@ def get_district_projects(district_code: str, db: Session = Depends(get_db)):
  districts = load_districts()
  area_name = districts.get(f"D{code}", districts.get(district_code, ""))
  return {"district": f"D{code}", "area": area_name, "projects": projects}
+
+@router.get("/districts/{district_code}/search")
+def search_district(district_code: str, property_type: str = "", sale_type: str = "", year_from: int = None, month_from: int = 1, year_to: int = None, month_to: int = 12):
+ """Search URA for transactions in a district with filters."""
+ from scrapers.district_search import search_by_district
+ records = search_by_district(district_code, property_type, sale_type, year_from, month_from, year_to, month_to, max_pages=10)
+ # Group by project name
+ projects = {}
+ for r in records:
+  name = r["project_name"]
+  if name not in projects:
+   projects[name] = {"name": name, "transactions": 0, "last_sale": None, "sale_types": set(), "property_type": r.get("property_type", "")}
+  projects[name]["transactions"] += 1
+  projects[name]["sale_types"].add(r.get("sale_type", ""))
+  if r.get("sale_date_parsed") and (not projects[name]["last_sale"] or str(r["sale_date_parsed"]) > str(projects[name]["last_sale"])):
+   projects[name]["last_sale"] = str(r["sale_date_parsed"])
+ result = sorted([{"name": p["name"], "transactions": p["transactions"], "last_sale": p["last_sale"], "sale_types": list(p["sale_types"]), "property_type": p["property_type"]} for p in projects.values()], key=lambda x: x["transactions"], reverse=True)
+ districts_data = load_districts()
+ area = districts_data.get(district_code.upper(), "")
+ return {"district": district_code, "area": area, "total_records": len(records), "projects": result}
