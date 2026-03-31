@@ -61,13 +61,13 @@ export interface YieldBand {
   confidence: string;
 }
 
-export async function fetchTransactions(projectName: string, page = 0, perPage = 20) {
+export async function fetchTransactions(projectName: string, page = 0, perPage = 100) {
   const res = await fetch(`${API_BASE}/project/${encodeURIComponent(projectName)}/transactions?page=${page}&per_page=${perPage}`);
   if (!res.ok) throw new Error('Failed to fetch transactions');
   return res.json();
 }
 
-export async function fetchRentals(projectName: string, page = 0, perPage = 20) {
+export async function fetchRentals(projectName: string, page = 0, perPage = 100) {
   const res = await fetch(`${API_BASE}/project/${encodeURIComponent(projectName)}/rentals?page=${page}&per_page=${perPage}`);
   if (!res.ok) throw new Error('Failed to fetch rentals');
   return res.json();
