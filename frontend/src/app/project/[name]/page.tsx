@@ -57,6 +57,53 @@ export default function ProjectPage() {
     });
   }, [rentals, dateFrom, dateTo]);
 
+  const filteredSummary = useMemo(() => {
+    if (!analytics) return null;
+    const psfValues = filteredTransactions.map(t => t.price_psf).filter(v => v > 0).sort((a,b) => a - b);
+    const rentValues = filteredRentals.map(r => r.monthly_rent).filter(v => v > 0).sort((a,b) => a - b);
+    const median = (arr: number[]) => {
+      if (arr.length === 0) return null;
+      const mid = Math.floor(arr.length / 2);
+      return arr.length % 2 ? arr[mid] : Math.round((arr[mid-1] + arr[mid]) / 2);
+    };
+    const lastTx = filteredTransactions.length > 0 ? filteredTransactions[0] : null;
+    return {
+      ...analytics,
+      median_psf: median(psfValues),
+      total_transactions: filteredTransactions.length,
+      median_monthly_rent: median(rentValues),
+      total_rentals: filteredRentals.length,
+      last_transaction_price: lastTx ? lastTx.transacted_price : null,
+      last_transaction_date: lastTx ? (lastTx.sale_date_parsed || lastTx.sale_date || null) : null,
+    };
+  }, [analytics, filteredTransactions, filteredRentals]);
+
+  const filteredYields = useMemo(() => {
+    const bands: Record<string, {rents: number[], prices: number[]}> = {};
+    filteredTransactions.forEach(t => {
+      const band = t.area_sqft_band || t.size_band || "unknown";
+      if (!bands[band]) bands[band] = {rents: [], prices: []};
+      if (t.transacted_price > 0) bands[band].prices.push(t.transacted_price);
+    });
+    filteredRentals.forEach(r => {
+      const band = r.area_sqft_band || r.size_band || "unknown";
+      if (!bands[band]) bands[band] = {rents: [], prices: []};
+      if (r.monthly_rent > 0) bands[band].rents.push(r.monthly_rent);
+    });
+    const median = (arr: number[]) => {
+      if (arr.length === 0) return 0;
+      const s = [...arr].sort((a,b) => a - b);
+      const m = Math.floor(s.length / 2);
+      return s.length % 2 ? s[m] : (s[m-1] + s[m]) / 2;
+    };
+    return Object.entries(bands).filter(([_,v]) => v.rents.length > 0 && v.prices.length > 0).map(([band, v]) => {
+      const medRent = median(v.rents);
+      const medPrice = median(v.prices);
+      const grossYield = medPrice > 0 ? ((medRent * 12) / medPrice * 100).toFixed(2) : "0";
+      return {size_band: band, size_band_label: band, median_rent: medRent, median_price: medPrice, gross_yield: parseFloat(grossYield), n_rentals: v.rents.length, n_sales: v.prices.length, confidence: v.rents.length >= 10 && v.prices.length >= 5 ? "High" : v.rents.length >= 3 ? "Medium" : "Low"};
+    }).sort((a,b) => b.n_rentals - a.n_rentals);
+  }, [filteredTransactions, filteredRentals]);
+
   useEffect(() => {
     if (!projectName) return;
     
@@ -162,7 +209,7 @@ export default function ProjectPage() {
           <div className="flex items-center justify-between">
             <Link href="/" className="text-gray-600 hover:text-gray-900">← Search</Link>
             <div className="flex items-center gap-2"><h1 className="text-xl font-bold text-gray-900">{decodeURIComponent(projectName)}</h1><button onClick={async () => { setLoading(true); await fetch(`${process.env.NEXT_PUBLIC_API_BASE_URL || "https://sg-property-intel.onrender.com"}/admin/ingest/${encodeURIComponent(decodeURIComponent(projectName))}`, { method: "POST" }); window.location.reload(); }} className="px-3 py-1 text-xs bg-blue-100 text-blue-700 rounded hover:bg-blue-200">↻ Refresh</button></div>
-            <div className="text-sm text-gray-500">{analytics?.postal_district ? `District ${analytics.postal_district}` : ""}</div>
+            <div className="text-sm text-gray-500">{filteredSummary?.postal_district ? `District ${filteredSummary.postal_district}` : ""}</div>
           </div>
         </div>
       </header>
@@ -185,10 +232,10 @@ export default function ProjectPage() {
         </div>
         {/* Summary Cards */}
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-8">
-          <SummaryCard label="Median PSF" value={analytics?.median_psf ? `$${analytics.median_psf}` : "—"} subtext={`${analytics?.total_transactions || 0} transactions`} />
-          <SummaryCard label="Median Rent" value={analytics?.median_monthly_rent ? `$${analytics.median_monthly_rent}` : "—"} subtext={`${analytics?.total_rentals || 0} rentals`} />
-          <SummaryCard label="Est. Yield" value={yields[0] ? `${yields[0].gross_yield}%` : "—"} subtext={yields[0]?.size_band_label || ""} />
-          <SummaryCard label="Last Sale" value={analytics?.last_transaction_price ? `$${(analytics.last_transaction_price / 1000000).toFixed(2)}M` : "—"} subtext={analytics?.last_transaction_date?.slice(0, 7) || ""} />
+          <SummaryCard label="Median PSF" value={filteredSummary?.median_psf ? `$${filteredSummary.median_psf}` : "—"} subtext={`${filteredSummary?.total_transactions || 0} transactions`} />
+          <SummaryCard label="Median Rent" value={filteredSummary?.median_monthly_rent ? `$${filteredSummary.median_monthly_rent}` : "—"} subtext={`${filteredSummary?.total_rentals || 0} rentals`} />
+          <SummaryCard label="Est. Yield" value={filteredYields[0] ? `${filteredYields[0].gross_yield}%` : "—"} subtext={filteredYields[0]?.size_band_label || ""} />
+          <SummaryCard label="Last Sale" value={filteredSummary?.last_transaction_price ? `$${(filteredSummary.last_transaction_price / 1000000).toFixed(2)}M` : "—"} subtext={filteredSummary?.last_transaction_date?.slice(0, 7) || ""} />
         </div>
 
         {/* Charts */}
@@ -229,7 +276,7 @@ export default function ProjectPage() {
         </div>
 
         {/* Yield Table */}
-        {yields.length > 0 && (
+        {filteredYields.length > 0 && (
           <div className="bg-white p-6 rounded-lg shadow-sm border border-gray-200 mb-8">
             <h2 className="text-lg font-semibold mb-4">Yield by Size Band</h2>
             <div className="overflow-x-auto">
@@ -245,7 +292,7 @@ export default function ProjectPage() {
                   </tr>
                 </thead>
                 <tbody>
-                  {yields.map((y) => (
+                  {filteredYields.map((y) => (
                     <tr key={y.size_band} className="border-b border-gray-100 hover:bg-gray-50">
                       <td className="py-3 px-4">{y.size_band_label}</td>
                       <td className="py-3 px-4 text-right">${y.median_rent.toLocaleString()}/mo</td>
