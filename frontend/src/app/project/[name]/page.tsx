@@ -21,6 +21,7 @@ export default function ProjectPage() {
   const [rentalTrend, setRentalTrend] = useState<TrendPoint[]>([]);
   const [dateFrom, setDateFrom] = useState("");
   const [dateTo, setDateTo] = useState("");
+  const [selectedBand, setSelectedBand] = useState(0);
 
   useEffect(() => {
     if (psfTrend.length > 0 || rentalTrend.length > 0) {
@@ -234,7 +235,13 @@ export default function ProjectPage() {
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-8">
           <SummaryCard label="Median PSF" value={filteredSummary?.median_psf ? `$${filteredSummary.median_psf}` : "—"} subtext={`${filteredSummary?.total_transactions || 0} transactions`} />
           <SummaryCard label="Median Rent" value={filteredSummary?.median_monthly_rent ? `$${filteredSummary.median_monthly_rent}` : "—"} subtext={`${filteredSummary?.total_rentals || 0} rentals`} />
-          <SummaryCard label="Est. Yield" value={filteredYields[0] ? `${filteredYields[0].gross_yield}%` : "—"} subtext={filteredYields[0]?.size_band_label || ""} />
+          <div className="bg-white p-5 rounded-lg shadow-sm border border-gray-200">
+              <div className="text-sm text-gray-500 mb-1">Est. Yield</div>
+              <div className="text-2xl font-bold text-gray-900">{filteredYields[selectedBand] ? `${filteredYields[selectedBand].gross_yield}%` : "—"}</div>
+              <select value={selectedBand} onChange={e => setSelectedBand(Number(e.target.value))} className="text-xs text-gray-400 mt-1 bg-transparent border-none outline-none cursor-pointer">
+                {filteredYields.length === 0 ? <option value={0}>No data</option> : filteredYields.map((y, i) => <option key={i} value={i}>{y.size_band_label} ({y.n_rentals}r/{y.n_sales}s)</option>)}
+              </select>
+            </div>
           <SummaryCard label="Last Sale" value={filteredSummary?.last_transaction_price ? `$${(filteredSummary.last_transaction_price / 1000000).toFixed(2)}M` : "—"} subtext={filteredSummary?.last_transaction_date?.slice(0, 7) || ""} />
         </div>
 
