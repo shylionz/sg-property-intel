@@ -82,12 +82,12 @@ export default function ProjectPage() {
   const filteredYields = useMemo(() => {
     const bands: Record<string, {rents: number[], prices: number[]}> = {};
     filteredTransactions.forEach(t => {
-      const band = t.area_sqft_band || t.size_band || "unknown";
+      const band = t.size_band || t.area_sqft_band || "unknown";
       if (!bands[band]) bands[band] = {rents: [], prices: []};
       if (t.transacted_price > 0) bands[band].prices.push(t.transacted_price);
     });
     filteredRentals.forEach(r => {
-      const band = r.area_sqft_band || r.size_band || "unknown";
+      const band = r.size_band || r.area_sqft_band || "unknown";
       if (!bands[band]) bands[band] = {rents: [], prices: []};
       if (r.monthly_rent > 0) bands[band].rents.push(r.monthly_rent);
     });
