@@ -4,6 +4,7 @@ FastAPI application entry point.
 """
 import os
 import sys
+import logging
 from datetime import datetime
 
 # Add the backend directory to the path
@@ -17,6 +18,8 @@ from models.database import init_db, SessionLocal, Transaction, Rental
 from api import project, district
 from utils.project_index import search_projects as search_project_index, is_project_valid
 from scrapers.project_fetcher import fetch_project_data
+
+logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s")
 
 # Create database on startup
 init_db()

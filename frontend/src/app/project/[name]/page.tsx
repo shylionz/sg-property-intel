@@ -4,7 +4,7 @@ import { useEffect, useState, useMemo } from "react";
 import { useParams, useRouter } from "next/navigation";
 import Link from "next/link";
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from "recharts";
-import { fetchAnalytics, fetchTransactions, fetchRentals, fetchYield, AnalyticsSummary, Transaction, Rental, YieldBand, TrendPoint } from "@/lib/api";
+import { fetchAnalytics, fetchTransactions, fetchRentals, fetchYield, AnalyticsSummary, Transaction, Rental, YieldBand, TrendPoint, RefreshInfo } from "@/lib/api";
 
 export default function ProjectPage() {
   const params = useParams();
@@ -19,6 +19,7 @@ export default function ProjectPage() {
   const [yields, setYields] = useState<YieldBand[]>([]);
   const [psfTrend, setPsfTrend] = useState<TrendPoint[]>([]);
   const [rentalTrend, setRentalTrend] = useState<TrendPoint[]>([]);
+  const [refreshInfo, setRefreshInfo] = useState<RefreshInfo | null>(null);
   const [dateFrom, setDateFrom] = useState("");
   const [dateTo, setDateTo] = useState("");
   const [selectedBand, setSelectedBand] = useState(0);
@@ -143,10 +144,12 @@ export default function ProjectPage() {
             setAnalytics(retryResult2.summary);
             setPsfTrend(retryResult2.psf_trend || []);
             setRentalTrend(retryResult2.rental_trend || []);
+            setRefreshInfo(retryResult2.refresh || null);
           } else {
             setAnalytics(retryResult.summary);
             setPsfTrend(retryResult.psf_trend || []);
             setRentalTrend(retryResult.rental_trend || []);
+            setRefreshInfo(retryResult.refresh || null);
           }
           // Re-fetch transactions, rentals, yield after successful ingestion
           const [txn2, rent2, yield2] = await Promise.allSettled([
@@ -165,6 +168,7 @@ export default function ProjectPage() {
         setAnalytics(analyticsData.summary);
         setPsfTrend(analyticsData.psf_trend || []);
         setRentalTrend(analyticsData.rental_trend || []);
+        setRefreshInfo(analyticsData.refresh || null);
 
         if (txnResult.status === "fulfilled") setTransactions(txnResult.value.data || []);
         if (rentResult.status === "fulfilled") setRentals(rentResult.value.data || []);
@@ -209,13 +213,23 @@ export default function ProjectPage() {
         <div className="max-w-7xl mx-auto px-6 py-4">
           <div className="flex items-center justify-between">
             <Link href="/" className="text-gray-600 hover:text-gray-900">← Search</Link>
-            <div className="flex items-center gap-2"><h1 className="text-xl font-bold text-gray-900">{decodeURIComponent(projectName)}</h1><button onClick={async () => { setLoading(true); await fetch(`${process.env.NEXT_PUBLIC_API_BASE_URL || "https://sg-property-intel.onrender.com"}/admin/ingest/${encodeURIComponent(decodeURIComponent(projectName))}`, { method: "POST" }); window.location.reload(); }} className="px-3 py-1 text-xs bg-blue-100 text-blue-700 rounded hover:bg-blue-200">↻ Refresh</button></div>
+            <div className="flex items-center gap-2"><h1 className="text-xl font-bold text-gray-900">{decodeURIComponent(projectName)}</h1><button onClick={async () => { setLoading(true); await fetchAnalytics(decodeURIComponent(projectName), true); window.location.reload(); }} className="px-3 py-1 text-xs bg-blue-100 text-blue-700 rounded hover:bg-blue-200">↻ Refresh now</button></div>
             <div className="text-sm text-gray-500">{filteredSummary?.postal_district ? `District ${filteredSummary.postal_district}` : ""}</div>
           </div>
         </div>
       </header>
 
       <main className="max-w-7xl mx-auto px-6 py-8">
+        {refreshInfo && (
+          <div className={`mb-4 rounded-lg border px-4 py-3 text-sm ${refreshInfo.status === "failed" ? "bg-amber-50 border-amber-200 text-amber-800" : "bg-blue-50 border-blue-200 text-blue-800"}`}>
+            {refreshInfo.status === "failed"
+              ? "Showing cached data. Latest URA refresh failed."
+              : `Last refreshed from URA: ${refreshInfo.last_refresh_completed_at ? new Date(refreshInfo.last_refresh_completed_at).toLocaleString() : "—"}`}
+            <span className="ml-2 text-xs opacity-75">
+              Source latest: {refreshInfo.latest_source_month || "—"} · DB latest: {refreshInfo.latest_db_month || "—"}{refreshInfo.throttled ? " · recently refreshed" : ""}
+            </span>
+          </div>
+        )}
         {/* Date Range Picker */}
         <div className="bg-white p-4 rounded-lg shadow-sm border border-gray-200 mb-6">
           <div className="flex items-center gap-4 flex-wrap">

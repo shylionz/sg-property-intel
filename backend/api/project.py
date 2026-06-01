@@ -15,19 +15,15 @@ from analytics.psf import (
 )
 from analytics.yield_engine import compute_yield_by_size_band
 from utils.parsers import normalise_project_name, resolve_project_name
-from scrapers.project_fetcher import fetch_project_data
+from scrapers.project_fetcher import fetch_project_data, refresh_project_transactions
 
 router = APIRouter(prefix="/project", tags=["project"])
 
 
 @router.get("/{project_name}/transactions")
-def get_transactions(project_name: str, page: int = Query(0, ge=0), per_page: int = Query(20, ge=1, le=100), db: Session = Depends(get_db)):
-    # Try to fetch project data if not exists
+def get_transactions(project_name: str, page: int = Query(0, ge=0), per_page: int = Query(20, ge=1, le=100), force_refresh: bool = Query(False), db: Session = Depends(get_db)):
     normalized_name = resolve_project_name(project_name, db)
-    count = db.query(Transaction).filter(Transaction.project_name == normalized_name).count()
-    if count == 0:
-        # Fetch data on-demand
-        fetch_project_data(normalized_name, db)
+    refresh = refresh_project_transactions(db, normalized_name, force=force_refresh)
     
     query = db.query(Transaction).filter(Transaction.project_name == normalized_name)
     total = query.count()
@@ -50,7 +46,7 @@ def get_transactions(project_name: str, page: int = Query(0, ge=0), per_page: in
             "market_segment": t.market_segment,
             "size_band": t.size_band,
         })
-    return {"project_name": normalized_name, "total": total, "page": page, "per_page": per_page, "data": data}
+    return {"project_name": normalized_name, "total": total, "page": page, "per_page": per_page, "data": data, "refresh": refresh}
 
 
 @router.get("/{project_name}/rentals")
@@ -83,14 +79,9 @@ def get_rentals(project_name: str, page: int = Query(0, ge=0), per_page: int = Q
 
 
 @router.get("/{project_name}/analytics")
-def get_analytics(project_name: str, db: Session = Depends(get_db)):
+def get_analytics(project_name: str, force_refresh: bool = Query(False), db: Session = Depends(get_db)):
     normalized_name = resolve_project_name(project_name, db)
-    # Check if data exists, if not fetch it
-    txn_count = db.query(Transaction).filter(Transaction.project_name == normalized_name).count()
-    rent_count = db.query(Rental).filter(Rental.project_name == normalized_name).count()
-    if txn_count == 0 and rent_count == 0:
-        # Fetch data on-demand
-        fetch_project_data(normalized_name, db)
+    refresh = refresh_project_transactions(db, normalized_name, force=force_refresh)
     
     transactions = db.query(Transaction).filter(Transaction.project_name == normalized_name).all()
     rentals = db.query(Rental).filter(Rental.project_name == normalized_name).all()
@@ -103,7 +94,7 @@ def get_analytics(project_name: str, db: Session = Depends(get_db)):
     rental_trend = compute_monthly_rental_trend(rent_dicts)
     median_rent = compute_median_rent(rent_dicts)
     last_txn = get_last_transaction(txn_dicts)
-    return {"project_name": normalized_name, "summary": {"median_psf": psf_stats.get("median_psf"), "p25_psf": psf_stats.get("p25_psf"), "p75_psf": psf_stats.get("p75_psf"), "last_transaction_date": last_txn.get("sale_date_parsed") if last_txn else None, "last_transaction_price": last_txn.get("transacted_price") if last_txn else None, "last_transaction_psf": last_txn.get("price_psf") if last_txn else None, "total_transactions": len(transactions), "median_monthly_rent": median_rent, "total_rentals": len(rentals)}, "psf_trend": psf_trend, "rental_trend": rental_trend}
+    return {"project_name": normalized_name, "summary": {"median_psf": psf_stats.get("median_psf"), "p25_psf": psf_stats.get("p25_psf"), "p75_psf": psf_stats.get("p75_psf"), "last_transaction_date": last_txn.get("sale_date_parsed") if last_txn else None, "last_transaction_price": last_txn.get("transacted_price") if last_txn else None, "last_transaction_psf": last_txn.get("price_psf") if last_txn else None, "total_transactions": len(transactions), "median_monthly_rent": median_rent, "total_rentals": len(rentals)}, "psf_trend": psf_trend, "rental_trend": rental_trend, "refresh": refresh}
 
 
 @router.get("/{project_name}/yield")

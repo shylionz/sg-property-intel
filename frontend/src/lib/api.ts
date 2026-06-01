@@ -61,8 +61,23 @@ export interface YieldBand {
   confidence: string;
 }
 
-export async function fetchTransactions(projectName: string, page = 0, perPage = 100) {
-  const res = await fetch(`${API_BASE}/project/${encodeURIComponent(projectName)}/transactions?page=${page}&per_page=${perPage}`);
+export interface RefreshInfo {
+  project_name: string;
+  source: string;
+  last_refresh_started_at: string | null;
+  last_refresh_completed_at: string | null;
+  status: string;
+  rows_fetched: number;
+  rows_inserted: number;
+  rows_updated: number;
+  latest_source_month: string | null;
+  latest_db_month: string | null;
+  error_message: string | null;
+  throttled?: boolean;
+}
+
+export async function fetchTransactions(projectName: string, page = 0, perPage = 100, forceRefresh = false) {
+  const res = await fetch(`${API_BASE}/project/${encodeURIComponent(projectName)}/transactions?page=${page}&per_page=${perPage}&force_refresh=${forceRefresh}`);
   if (!res.ok) throw new Error('Failed to fetch transactions');
   return res.json();
 }
@@ -73,8 +88,8 @@ export async function fetchRentals(projectName: string, page = 0, perPage = 100)
   return res.json();
 }
 
-export async function fetchAnalytics(projectName: string) {
-  const res = await fetch(`${API_BASE}/project/${encodeURIComponent(projectName)}/analytics`);
+export async function fetchAnalytics(projectName: string, forceRefresh = false) {
+  const res = await fetch(`${API_BASE}/project/${encodeURIComponent(projectName)}/analytics?force_refresh=${forceRefresh}`);
   if (!res.ok) throw new Error('Failed to fetch analytics');
   return res.json();
 }
