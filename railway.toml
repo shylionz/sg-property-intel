@@ -1,5 +1,5 @@
 [build]
-builder = "RAILPACK"
+builder = "NIXPACKS"
 buildCommand = "cd backend && python -m pip install --prefer-binary -r requirements.txt"
 
 [deploy]
