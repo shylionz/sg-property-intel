@@ -1,4 +1,4 @@
-const API_BASE = process.env.NEXT_PUBLIC_API_BASE_URL || 'https://sg-property-intel.onrender.com';
+const API_BASE = process.env.NEXT_PUBLIC_API_BASE_URL || 'https://sg-property-intel-backend-production.up.railway.app';
 
 export interface Transaction {
   project_name: string;
@@ -77,13 +77,13 @@ export interface RefreshInfo {
 }
 
 export async function fetchTransactions(projectName: string, page = 0, perPage = 100, forceRefresh = false) {
-  const res = await fetch(`${API_BASE}/project/${encodeURIComponent(projectName)}/transactions?page=${page}&per_page=${perPage}&force_refresh=${forceRefresh}`);
+  const res = await fetch(`${API_BASE}/project/${encodeURIComponent(projectName)}/transactions?page=${page}&per_page=${perPage}&force_refresh=${forceRefresh}&refresh_data=false`);
   if (!res.ok) throw new Error('Failed to fetch transactions');
   return res.json();
 }
 
 export async function fetchRentals(projectName: string, page = 0, perPage = 100) {
-  const res = await fetch(`${API_BASE}/project/${encodeURIComponent(projectName)}/rentals?page=${page}&per_page=${perPage}`);
+  const res = await fetch(`${API_BASE}/project/${encodeURIComponent(projectName)}/rentals?page=${page}&per_page=${perPage}&refresh_data=false`);
   if (!res.ok) throw new Error('Failed to fetch rentals');
   return res.json();
 }
@@ -99,3 +99,22 @@ export async function fetchYield(projectName: string) {
   if (!res.ok) throw new Error('Failed to fetch yield');
   return res.json();
 }
+
+// Load every advertised page before calculating date-filtered summaries. Reject
+// partial/changed datasets instead of silently presenting a 100-row sample as all data.
+async function fetchAll<T>(fetchPage: (page: number) => Promise<{total: number; data: T[]}>) {
+  const first = await fetchPage(0);
+  const rows = [...first.data];
+  for (let page = 1; rows.length < first.total; page++) {
+    const next = await fetchPage(page);
+    if (next.total !== first.total || !next.data.length) {
+      throw new Error("Property records changed while loading. Please refresh and try again.");
+    }
+    rows.push(...next.data);
+  }
+  if (rows.length !== first.total) throw new Error("Could not load the complete property records.");
+  return rows;
+}
+
+export const fetchAllTransactions = (name: string) => fetchAll<Transaction>(page => fetchTransactions(name, page));
+export const fetchAllRentals = (name: string) => fetchAll<Rental>(page => fetchRentals(name, page));

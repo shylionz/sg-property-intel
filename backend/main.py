@@ -18,10 +18,17 @@ from models.database import init_db, SessionLocal, Transaction, Rental
 from api import project, district
 from utils.project_index import search_projects as search_project_index, is_project_valid
 from scrapers.project_fetcher import fetch_project_data
+from utils.backup import ensure_rental_backup
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s")
 
-# Create database on startup
+# Back up a mounted production SQLite database before adding metadata tables or
+# serving any refresh request. On a fresh installation there is nothing to back up.
+backup_session = SessionLocal()
+try:
+    ensure_rental_backup(backup_session)
+finally:
+    backup_session.close()
 init_db()
 
 app = FastAPI(
@@ -129,50 +136,11 @@ def validate_project(project_name: str):
 
 def _run_ingest(project_name: str):
     """Background ingest task - fetches URA data and stores in DB."""
-    from scrapers.transactions import fetch_transactions
-    from scrapers.rentals import fetch_rentals
-
     db = SessionLocal()
     try:
-        txns = fetch_transactions(
-            project_name, year_from=datetime.now().year - 5, month_from=1, year_to=datetime.now().year, month_to=12, max_pages=50
-        )
-        rents = fetch_rentals(
-            project_name, year_from=datetime.now().year - 5, month_from=1, year_to=datetime.now().year, month_to=12, max_pages=50
-        )
-
-        # Clear existing data for this project before re-inserting
-        db.query(Transaction).filter(Transaction.project_name == project_name).delete()
-        db.query(Rental).filter(Rental.project_name == project_name).delete()
-
-        for rec in txns:
-            db.add(Transaction(
-                project_name=rec.get("project_name"), street_name=rec.get("street_name"),
-                postal_district=rec.get("postal_district"), market_segment=rec.get("market_segment"),
-                property_type=rec.get("property_type"), tenure=rec.get("tenure"),
-                sale_type=rec.get("sale_type"), sale_date=rec.get("sale_date"),
-                sale_date_parsed=rec.get("sale_date_parsed"), transacted_price=rec.get("transacted_price"),
-                nett_price=rec.get("nett_price"), area_sqft=rec.get("area_sqft"),
-                area_sqft_band=rec.get("area_sqft_band"), area_sqm=rec.get("area_sqm"),
-                price_psf=rec.get("price_psf"), price_psm=rec.get("price_psm"),
-                floor_band=rec.get("floor_band"), number_of_units=rec.get("number_of_units"),
-                size_band=rec.get("size_band"),
-            ))
-
-        for rec in rents:
-            db.add(Rental(
-                project_name=rec.get("project_name"), street_name=rec.get("street_name"),
-                postal_district=rec.get("postal_district"), property_type=rec.get("property_type"),
-                bedrooms=rec.get("bedrooms"), monthly_rent=rec.get("monthly_rent"),
-                area_sqft_band=rec.get("area_sqft_band"), area_sqm_band=rec.get("area_sqm_band"),
-                area_sqft_midpoint=rec.get("area_sqft_midpoint"), lease_date=rec.get("lease_date"),
-                lease_date_parsed=rec.get("lease_date_parsed"), size_band=rec.get("size_band"),
-            ))
-
-        db.commit()
-    except Exception as e:
-        db.rollback()
-        raise e
+        result = fetch_project_data(project_name, db)
+        if result["status"] == "failed":
+            raise RuntimeError("URA refresh failed; cached records were retained")
     finally:
         db.close()
 

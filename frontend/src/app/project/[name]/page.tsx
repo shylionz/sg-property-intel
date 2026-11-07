@@ -1,14 +1,13 @@
 "use client";
 
 import { useEffect, useState, useMemo } from "react";
-import { useParams, useRouter } from "next/navigation";
+import { useParams } from "next/navigation";
 import Link from "next/link";
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from "recharts";
-import { fetchAnalytics, fetchTransactions, fetchRentals, fetchYield, AnalyticsSummary, Transaction, Rental, YieldBand, TrendPoint, RefreshInfo } from "@/lib/api";
+import { fetchAnalytics, fetchAllTransactions, fetchAllRentals, AnalyticsSummary, Transaction, Rental, TrendPoint, RefreshInfo } from "@/lib/api";
 
 export default function ProjectPage() {
   const params = useParams();
-  const router = useRouter();
   const projectName = params.name as string;
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -16,21 +15,16 @@ export default function ProjectPage() {
   const [analytics, setAnalytics] = useState<AnalyticsSummary | null>(null);
   const [transactions, setTransactions] = useState<Transaction[]>([]);
   const [rentals, setRentals] = useState<Rental[]>([]);
-  const [yields, setYields] = useState<YieldBand[]>([]);
   const [psfTrend, setPsfTrend] = useState<TrendPoint[]>([]);
   const [rentalTrend, setRentalTrend] = useState<TrendPoint[]>([]);
   const [refreshInfo, setRefreshInfo] = useState<RefreshInfo | null>(null);
+  const [rentalRefreshInfo, setRentalRefreshInfo] = useState<RefreshInfo | null>(null);
+  const [refreshVersion, setRefreshVersion] = useState(0);
+  const [transactionPage, setTransactionPage] = useState(0);
+  const [rentalPage, setRentalPage] = useState(0);
   const [dateFrom, setDateFrom] = useState("");
   const [dateTo, setDateTo] = useState("");
   const [selectedBand, setSelectedBand] = useState(0);
-
-  useEffect(() => {
-    if (psfTrend.length > 0 || rentalTrend.length > 0) {
-      const allMonths = [...psfTrend.map(p => p.month), ...rentalTrend.map(r => r.month)].sort();
-      if (allMonths.length > 0 && !dateFrom) setDateFrom(allMonths[0]);
-      if (allMonths.length > 0 && !dateTo) setDateTo(allMonths[allMonths.length - 1]);
-    }
-  }, [psfTrend, rentalTrend]);
 
   const monthOptions = useMemo(() => {
     const allMonths = new Set([...psfTrend.map(p => p.month), ...rentalTrend.map(r => r.month)]);
@@ -98,7 +92,7 @@ export default function ProjectPage() {
       const m = Math.floor(s.length / 2);
       return s.length % 2 ? s[m] : (s[m-1] + s[m]) / 2;
     };
-    return Object.entries(bands).filter(([_,v]) => v.rents.length > 0 && v.prices.length > 0).map(([band, v]) => {
+    return Object.entries(bands).filter(([,v]) => v.rents.length > 0 && v.prices.length > 0).map(([band, v]) => {
       const medRent = median(v.rents);
       const medPrice = median(v.prices);
       const grossYield = medPrice > 0 ? ((medRent * 12) / medPrice * 100).toFixed(2) : "0";
@@ -108,81 +102,43 @@ export default function ProjectPage() {
 
   useEffect(() => {
     if (!projectName) return;
-    
+    let cancelled = false;
     async function loadData() {
       setLoading(true);
       setError("");
-
-      const decodedName = decodeURIComponent(projectName);
-
       try {
-        // Use allSettled so a single failing endpoint (e.g. yield with no data)
-        // doesn't crash the entire page
-        const [analyticsResult, txnResult, rentResult, yieldResult] = await Promise.allSettled([
-          fetchAnalytics(decodedName),
-          fetchTransactions(decodedName),
-          fetchRentals(decodedName),
-          fetchYield(decodedName),
+        const name = decodeURIComponent(projectName);
+        // Finish both source refreshes before reading table pages, so charts,
+        // summaries and tables describe the same refreshed records.
+        const data = await fetchAnalytics(name, refreshVersion > 0);
+        if (cancelled) return;
+        const [allTransactions, allRentals] = await Promise.all([
+          fetchAllTransactions(name), fetchAllRentals(name),
         ]);
-
-        // Analytics is required — if it fails, project doesn't exist or DB is empty
-        if (analyticsResult.status === "rejected") {
-          // Auto-trigger ingest and retry with loading spinner
-          await fetch(`${process.env.NEXT_PUBLIC_API_BASE_URL || 'https://sg-property-intel.onrender.com'}/admin/ingest/${encodeURIComponent(decodedName)}`, { method: 'POST' });
-          // Wait 30 seconds then retry automatically
-          await new Promise(resolve => setTimeout(resolve, 30000));
-          const retryResult = await fetchAnalytics(decodedName).catch(() => null);
-          if (!retryResult) {
-            // Second retry after another 30 seconds
-            await new Promise(resolve => setTimeout(resolve, 30000));
-            const retryResult2 = await fetchAnalytics(decodedName).catch(() => null);
-            if (!retryResult2) {
-              setError(`Could not load data for "${decodedName}" after ingestion. Please try again later.`);
-              setLoading(false);
-              return;
-            }
-            setAnalytics(retryResult2.summary);
-            setPsfTrend(retryResult2.psf_trend || []);
-            setRentalTrend(retryResult2.rental_trend || []);
-            setRefreshInfo(retryResult2.refresh || null);
-          } else {
-            setAnalytics(retryResult.summary);
-            setPsfTrend(retryResult.psf_trend || []);
-            setRentalTrend(retryResult.rental_trend || []);
-            setRefreshInfo(retryResult.refresh || null);
-          }
-          // Re-fetch transactions, rentals, yield after successful ingestion
-          const [txn2, rent2, yield2] = await Promise.allSettled([
-            fetchTransactions(decodedName),
-            fetchRentals(decodedName),
-            fetchYield(decodedName),
-          ]);
-          if (txn2.status === "fulfilled") setTransactions(txn2.value.data || []);
-          if (rent2.status === "fulfilled") setRentals(rent2.value.data || []);
-          if (yield2.status === "fulfilled") setYields(yield2.value.yield_by_size_band || []);
-          setLoading(false);
-          return;
-        }
-
-        const analyticsData = analyticsResult.value;
-        setAnalytics(analyticsData.summary);
-        setPsfTrend(analyticsData.psf_trend || []);
-        setRentalTrend(analyticsData.rental_trend || []);
-        setRefreshInfo(analyticsData.refresh || null);
-
-        if (txnResult.status === "fulfilled") setTransactions(txnResult.value.data || []);
-        if (rentResult.status === "fulfilled") setRentals(rentResult.value.data || []);
-        if (yieldResult.status === "fulfilled") setYields(yieldResult.value.yield_by_size_band || []);
-
-      } catch (e: any) {
-        setError(e.message || "Failed to load data");
+        if (cancelled) return;
+        setAnalytics(data.summary);
+        setTransactions(allTransactions);
+        setRentals(allRentals);
+        setPsfTrend(data.psf_trend || []);
+        setRentalTrend(data.rental_trend || []);
+        setRefreshInfo(data.refresh || null);
+        setRentalRefreshInfo(data.rental_refresh || null);
+        setDateFrom("");
+        setDateTo("");
+        setTransactionPage(0);
+        setRentalPage(0);
+      } catch (error: unknown) {
+        if (!cancelled) setError(error instanceof Error ? error.message : "Failed to load data");
       } finally {
-        setLoading(false);
+        if (!cancelled) setLoading(false);
       }
     }
-    
     loadData();
-  }, [projectName]);
+    return () => { cancelled = true; };
+  }, [projectName, refreshVersion]);
+
+  const visibleTransactionPage = Math.min(transactionPage, Math.max(0, Math.ceil(filteredTransactions.length / 50) - 1));
+  const visibleRentalPage = Math.min(rentalPage, Math.max(0, Math.ceil(filteredRentals.length / 50) - 1));
 
   if (loading) {
     return (
@@ -213,35 +169,27 @@ export default function ProjectPage() {
         <div className="max-w-7xl mx-auto px-6 py-4">
           <div className="flex items-center justify-between">
             <Link href="/" className="text-gray-600 hover:text-gray-900">← Search</Link>
-            <div className="flex items-center gap-2"><h1 className="text-xl font-bold text-gray-900">{decodeURIComponent(projectName)}</h1><button onClick={async () => { setLoading(true); await fetchAnalytics(decodeURIComponent(projectName), true); window.location.reload(); }} className="px-3 py-1 text-xs bg-blue-100 text-blue-700 rounded hover:bg-blue-200">↻ Refresh now</button></div>
+            <div className="flex items-center gap-2"><h1 className="text-xl font-bold text-gray-900">{decodeURIComponent(projectName)}</h1><button onClick={() => setRefreshVersion(v => v + 1)} className="px-3 py-1 text-xs bg-blue-100 text-blue-700 rounded hover:bg-blue-200">↻ Refresh now</button></div>
             <div className="text-sm text-gray-500">{filteredSummary?.postal_district ? `District ${filteredSummary.postal_district}` : ""}</div>
           </div>
         </div>
       </header>
 
       <main className="max-w-7xl mx-auto px-6 py-8">
-        {refreshInfo && (
-          <div className={`mb-4 rounded-lg border px-4 py-3 text-sm ${refreshInfo.status === "failed" ? "bg-amber-50 border-amber-200 text-amber-800" : "bg-blue-50 border-blue-200 text-blue-800"}`}>
-            {refreshInfo.status === "failed"
-              ? "Showing cached data. Latest URA refresh failed."
-              : `Last refreshed from URA: ${refreshInfo.last_refresh_completed_at ? new Date(refreshInfo.last_refresh_completed_at).toLocaleString() : "—"}`}
-            <span className="ml-2 text-xs opacity-75">
-              Source latest: {refreshInfo.latest_source_month || "—"} · DB latest: {refreshInfo.latest_db_month || "—"}{refreshInfo.throttled ? " · recently refreshed" : ""}
-            </span>
-          </div>
-        )}
+        <Freshness label="Sales" info={refreshInfo} />
+        <Freshness label="Rentals" info={rentalRefreshInfo} />
         {/* Date Range Picker */}
         <div className="bg-white p-4 rounded-lg shadow-sm border border-gray-200 mb-6">
           <div className="flex items-center gap-4 flex-wrap">
             <span className="text-sm font-medium text-gray-700">Date Range:</span>
-            <select value={dateFrom} onChange={(e) => setDateFrom(e.target.value)} className="px-3 py-2 border border-gray-300 rounded-md text-sm bg-white">
-              {monthOptions.map(m => (<option key={m} value={m}>{m}</option>))}
+            <select value={dateFrom} onChange={(e) => { setDateFrom(e.target.value); setTransactionPage(0); setRentalPage(0); }} className="px-3 py-2 border border-gray-300 rounded-md text-sm bg-white">
+              <option value="">All months</option>{monthOptions.map(m => (<option key={m} value={m}>{m}</option>))}
             </select>
             <span className="text-gray-400">to</span>
-            <select value={dateTo} onChange={(e) => setDateTo(e.target.value)} className="px-3 py-2 border border-gray-300 rounded-md text-sm bg-white">
-              {monthOptions.map(m => (<option key={m} value={m}>{m}</option>))}
+            <select value={dateTo} onChange={(e) => { setDateTo(e.target.value); setTransactionPage(0); setRentalPage(0); }} className="px-3 py-2 border border-gray-300 rounded-md text-sm bg-white">
+              <option value="">All months</option>{monthOptions.map(m => (<option key={m} value={m}>{m}</option>))}
             </select>
-            <button onClick={() => { if (monthOptions.length > 0) { setDateFrom(monthOptions[0]); setDateTo(monthOptions[monthOptions.length - 1]); }}} className="px-3 py-2 text-xs bg-gray-100 text-gray-600 rounded hover:bg-gray-200">Reset</button>
+            <button onClick={() => { setDateFrom(""); setDateTo(""); setTransactionPage(0); setRentalPage(0); }} className="px-3 py-2 text-xs bg-gray-100 text-gray-600 rounded hover:bg-gray-200">Reset</button>
             <span className="text-sm font-medium text-gray-700">Size:</span><select value={selectedBand} onChange={e => setSelectedBand(Number(e.target.value))} className="px-3 py-2 border border-gray-300 rounded-md text-sm bg-white">{filteredYields.length === 0 ? <option value={0}>All</option> : filteredYields.map((y,i) => <option key={i} value={i}>{y.size_band_label} ({y.n_rentals}r/{y.n_sales}s)</option>)}</select><span className="text-xs text-gray-400">{filteredTransactions.length} txns · {filteredRentals.length} rentals</span>
           </div>
         </div>
@@ -346,7 +294,7 @@ export default function ProjectPage() {
                 </tr>
               </thead>
               <tbody>
-                {filteredTransactions.slice(0, 50).map((t, i) => (
+                {filteredTransactions.slice(visibleTransactionPage * 50, (visibleTransactionPage + 1) * 50).map((t, i) => (
                   <tr key={i} className="border-b border-gray-100 hover:bg-gray-50">
                     <td className="py-2 px-3">{t.sale_date}</td>
                     <td className="py-2 px-3 text-right">${t.transacted_price.toLocaleString()}</td>
@@ -359,6 +307,7 @@ export default function ProjectPage() {
               </tbody>
             </table>
           </div>
+          <TablePagination page={visibleTransactionPage} total={filteredTransactions.length} onChange={setTransactionPage} />
         </div>
 
         {/* Rental Table */}
@@ -375,7 +324,7 @@ export default function ProjectPage() {
                 </tr>
               </thead>
               <tbody>
-                {filteredRentals.slice(0, 50).map((r, i) => (
+                {filteredRentals.slice(visibleRentalPage * 50, (visibleRentalPage + 1) * 50).map((r, i) => (
                   <tr key={i} className="border-b border-gray-100 hover:bg-gray-50">
                     <td className="py-2 px-3">{r.lease_date}</td>
                     <td className="py-2 px-3 text-right">${r.monthly_rent.toLocaleString()}/mo</td>
@@ -386,6 +335,7 @@ export default function ProjectPage() {
               </tbody>
             </table>
           </div>
+          <TablePagination page={visibleRentalPage} total={filteredRentals.length} onChange={setRentalPage} />
         </div>
       </main>
     </div>
@@ -398,6 +348,35 @@ function SummaryCard({ label, value, subtext }: { label: string; value: string; 
       <div className="text-sm text-gray-500 mb-1">{label}</div>
       <div className="text-2xl font-bold text-gray-900">{value}</div>
       <div className="text-xs text-gray-400 mt-1">{subtext}</div>
+    </div>
+  );
+}
+
+function Freshness({ label, info }: { label: string; info: RefreshInfo | null }) {
+  const failed = !info || info.status !== "success";
+  return (
+    <div className={`mb-3 rounded-lg border px-4 py-3 text-sm ${failed ? "bg-amber-50 border-amber-200 text-amber-800" : "bg-blue-50 border-blue-200 text-blue-800"}`}>
+      <strong>{label}: </strong>
+      {failed ? "Showing cached records; freshness could not be verified."
+        : `Checked with URA: ${info.last_refresh_completed_at ? new Date(info.last_refresh_completed_at.endsWith("Z") ? info.last_refresh_completed_at : info.last_refresh_completed_at + "Z").toLocaleString() : "—"}`}
+      <span className="ml-2 text-xs opacity-75">
+        Latest stored month: {info?.latest_db_month || "—"}
+        {!failed && ` · Latest source month: ${info.latest_source_month || "—"}`}
+      </span>
+    </div>
+  );
+}
+
+function TablePagination({ page, total, onChange }: { page: number; total: number; onChange: (page: number) => void }) {
+  const pages = Math.max(1, Math.ceil(total / 50));
+  return (
+    <div className="flex items-center justify-between mt-4 text-sm text-gray-600">
+      <span>{total ? `${page * 50 + 1}–${Math.min((page + 1) * 50, total)} of ${total}` : "No matching records"}</span>
+      <div className="flex gap-3 items-center">
+        <button disabled={page === 0} onClick={() => onChange(page - 1)} className="px-3 py-1 border rounded disabled:opacity-40">Previous</button>
+        <span>Page {page + 1} of {pages}</span>
+        <button disabled={page + 1 >= pages} onClick={() => onChange(page + 1)} className="px-3 py-1 border rounded disabled:opacity-40">Next</button>
+      </div>
     </div>
   );
 }

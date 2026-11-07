@@ -11,8 +11,9 @@ from sqlalchemy import func
 
 from .transactions import fetch_transactions
 from .rentals import fetch_rentals
-from models.database import Transaction, Rental, ProjectRefreshStatus
+from models.database import Transaction, Rental, ProjectRefreshStatus, RentalRefreshStatus
 from utils.parsers import normalise_project_name
+from utils.backup import ensure_rental_backup
 
 logger = logging.getLogger("sg_property_intel.refresh")
 
@@ -229,39 +230,103 @@ def refresh_project_transactions(db: Session, project_name: str, force: bool = F
             return {**get_project_refresh_status(db, normalized), "throttled": False}
 
 
-def fetch_project_data(project_name: str, db: Session) -> Dict:
-    """
-    Backward-compatible project fetcher. Refreshes transactions by upsert; rentals
-    keep the existing replace-on-fetch behavior for now because the freshness issue
-    is transaction data and rental dedupe needs its own key review.
+def refresh_project_rentals(db: Session, project_name: str, force: bool = False) -> Dict:
+    """Atomically replace only a fully validated source window, retaining multiplicity.
+
+    URA exposes no contract identifier. Two identical rows can represent two real
+    contracts, so a complete snapshot is safer than deduplicating by visible fields.
+    Historical rows outside the source window are retained.
     """
     normalized = normalise_project_name(project_name)
-    refresh = refresh_project_transactions(db, normalized, force=True)
-    if refresh.get("status") == "failed":
-        raise HTTPException(status_code=500, detail=f"Failed to fetch project data: {refresh.get('error_message')}")
-
-    try:
-        rents = fetch_rentals(
-            normalized, year_from=datetime.now().year - 5, month_from=1, year_to=datetime.now().year, month_to=12, max_pages=50
-        )
-        db.query(Rental).filter(Rental.project_name == normalized).delete()
-        for rec in rents:
-            db.add(Rental(
-                project_name=rec.get("project_name"), street_name=rec.get("street_name"),
-                postal_district=rec.get("postal_district"), property_type=rec.get("property_type"),
-                bedrooms=rec.get("bedrooms"), monthly_rent=rec.get("monthly_rent"),
-                area_sqft_band=rec.get("area_sqft_band"), area_sqm_band=rec.get("area_sqm_band"),
-                area_sqft_midpoint=rec.get("area_sqft_midpoint"), lease_date=rec.get("lease_date"),
-                lease_date_parsed=rec.get("lease_date_parsed"), size_band=rec.get("size_band"),
-            ))
+    with _project_lock("rentals:" + normalized):
+        # End any read transaction opened before waiting for another refresher.
         db.commit()
-    except Exception:
-        db.rollback()
+        status = db.get(RentalRefreshStatus, normalized)
+        now = datetime.utcnow()
+        if status and not force and status.last_refresh_completed_at:
+            cooldown = 15 if status.status == "success" else 1
+            if now - status.last_refresh_completed_at < timedelta(minutes=cooldown):
+                return {**_rental_status(status), "throttled": True}
+        if not status:
+            status = RentalRefreshStatus(project_name=normalized, source="URA_HTML")
+            db.add(status)
+        status.last_refresh_started_at = now
+        status.status = "running"
+        status.error_message = None
+        db.commit()
+        try:
+            from datetime import date
+            start = date(now.year - 5, 1, 1)
+            end = date(now.year, now.month, 1)
+            rents = fetch_rentals(normalized, year_from=start.year, month_from=start.month,
+                                  year_to=end.year, month_to=end.month)
+            if not rents:
+                raise ValueError("No validated rental snapshot; keeping cached records")
+            if any(normalise_project_name(rec.get("project_name", "")) != normalized
+                   or not rec.get("lease_date_parsed")
+                   or not start <= rec["lease_date_parsed"] <= end
+                   or not rec.get("monthly_rent") or rec["monthly_rent"] <= 0 for rec in rents):
+                raise ValueError("Invalid rental snapshot; keeping cached records")
+            latest = _latest_month(rents, "lease_date_parsed")
+            previous_latest = db.query(func.max(Rental.lease_date_parsed)).filter(
+                Rental.project_name == normalized).scalar()
+            if previous_latest and latest < str(previous_latest)[:7]:
+                raise ValueError("URA rental snapshot is older than cached records")
+            # URA may enforce a rolling retention window narrower than the
+            # requested range. Keep older cached history rather than silently
+            # deleting records the source no longer publishes.
+            replace_from = max(start, min(rec["lease_date_parsed"] for rec in rents))
+            ensure_rental_backup(db)
+            db.query(Rental).filter(Rental.project_name == normalized,
+                                   Rental.lease_date_parsed >= replace_from,
+                                   Rental.lease_date_parsed <= end).delete(synchronize_session=False)
+            for rec in rents:
+                fields = {key: value for key, value in rec.items() if key in Rental.__table__.columns
+                          and key not in ("id", "fetched_at")}
+                fields["project_name"] = normalized
+                db.add(Rental(**fields))
+            db.flush()
+            status.status = "success"
+            status.rows_fetched = len(rents)
+            status.rows_inserted = len(rents)
+            status.rows_updated = 0
+            status.latest_source_month = latest
+            status.latest_db_month = str(db.query(func.max(Rental.lease_date_parsed)).filter(
+                Rental.project_name == normalized).scalar())[:7]
+            status.last_refresh_completed_at = datetime.utcnow()
+            db.commit()
+        except Exception as exc:
+            db.rollback()
+            status = db.get(RentalRefreshStatus, normalized)
+            status.status = "failed"
+            status.error_message = str(exc)[:1000]
+            status.last_refresh_completed_at = datetime.utcnow()
+            latest = db.query(func.max(Rental.lease_date_parsed)).filter(Rental.project_name == normalized).scalar()
+            status.latest_db_month = str(latest)[:7] if latest else None
+            db.commit()
+            logger.exception("Rental refresh failed for %s", normalized)
+        return {**_rental_status(status), "throttled": False}
 
+
+def _rental_status(status) -> Dict:
+    result = {key: getattr(status, key) for key in (
+        "project_name", "source", "status", "rows_fetched", "rows_inserted", "rows_updated",
+        "latest_source_month", "latest_db_month", "error_message")}
+    for key in ("last_refresh_started_at", "last_refresh_completed_at"):
+        value = getattr(status, key)
+        result[key] = value.isoformat() + "Z" if value else None
+    return result
+
+
+def fetch_project_data(project_name: str, db: Session) -> Dict:
+    normalized = normalise_project_name(project_name)
+    refresh = refresh_project_transactions(db, normalized, force=True)
+    rental_refresh = refresh_project_rentals(db, normalized, force=True)
     return {
         "project": normalized,
         "transactions": db.query(Transaction).filter(Transaction.project_name == normalized).count(),
         "rentals": db.query(Rental).filter(Rental.project_name == normalized).count(),
-        "status": refresh.get("status", "unknown"),
+        "status": "failed" if any(s.get("status") == "failed" for s in (refresh, rental_refresh)) else "success",
         "refresh": refresh,
+        "rental_refresh": rental_refresh,
     }
