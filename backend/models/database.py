@@ -91,6 +91,21 @@ class ProjectRefreshStatus(Base):
     latest_db_month = Column(String)
     error_message = Column(Text)
 
+class RentalRefreshStatus(Base):
+    __tablename__ = "rental_refresh_status"
+
+    project_name = Column(String, primary_key=True, index=True)
+    source = Column(String, default="URA_HTML")
+    last_refresh_started_at = Column(DateTime)
+    last_refresh_completed_at = Column(DateTime)
+    status = Column(String)
+    rows_fetched = Column(Integer, default=0)
+    rows_inserted = Column(Integer, default=0)
+    rows_updated = Column(Integer, default=0)
+    latest_source_month = Column(String)
+    latest_db_month = Column(String)
+    error_message = Column(Text)
+
 # Helper functions
 
 def get_db():

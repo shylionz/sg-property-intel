@@ -15,19 +15,19 @@ from analytics.psf import (
 )
 from analytics.yield_engine import compute_yield_by_size_band
 from utils.parsers import normalise_project_name, resolve_project_name
-from scrapers.project_fetcher import fetch_project_data, refresh_project_transactions
+from scrapers.project_fetcher import fetch_project_data, refresh_project_transactions, refresh_project_rentals, get_project_refresh_status
 
 router = APIRouter(prefix="/project", tags=["project"])
 
 
 @router.get("/{project_name}/transactions")
-def get_transactions(project_name: str, page: int = Query(0, ge=0), per_page: int = Query(20, ge=1, le=100), force_refresh: bool = Query(False), db: Session = Depends(get_db)):
+def get_transactions(project_name: str, page: int = Query(0, ge=0), per_page: int = Query(20, ge=1, le=100), force_refresh: bool = Query(False), refresh_data: bool = Query(True), db: Session = Depends(get_db)):
     normalized_name = resolve_project_name(project_name, db)
-    refresh = refresh_project_transactions(db, normalized_name, force=force_refresh)
+    refresh = refresh_project_transactions(db, normalized_name, force=force_refresh) if refresh_data else get_project_refresh_status(db, normalized_name)
     
     query = db.query(Transaction).filter(Transaction.project_name == normalized_name)
     total = query.count()
-    transactions = query.order_by(Transaction.sale_date_parsed.desc()).offset(page * per_page).limit(per_page).all()
+    transactions = query.order_by(Transaction.sale_date_parsed.desc(), Transaction.id.desc()).offset(page * per_page).limit(per_page).all()
     data = []
     for t in transactions:
         data.append({
@@ -50,17 +50,14 @@ def get_transactions(project_name: str, page: int = Query(0, ge=0), per_page: in
 
 
 @router.get("/{project_name}/rentals")
-def get_rentals(project_name: str, page: int = Query(0, ge=0), per_page: int = Query(20, ge=1, le=100), db: Session = Depends(get_db)):
+def get_rentals(project_name: str, page: int = Query(0, ge=0), per_page: int = Query(20, ge=1, le=100), force_refresh: bool = Query(False), refresh_data: bool = Query(True), db: Session = Depends(get_db)):
     # Try to fetch project data if not exists
     normalized_name = resolve_project_name(project_name, db)
-    count = db.query(Rental).filter(Rental.project_name == normalized_name).count()
-    if count == 0:
-        # Fetch data on-demand
-        fetch_project_data(normalized_name, db)
-    
+    rental_refresh = refresh_project_rentals(db, normalized_name, force=force_refresh) if refresh_data else None
+
     query = db.query(Rental).filter(Rental.project_name == normalized_name)
     total = query.count()
-    rentals = query.order_by(Rental.lease_date_parsed.desc()).offset(page * per_page).limit(per_page).all()
+    rentals = query.order_by(Rental.lease_date_parsed.desc(), Rental.id.desc()).offset(page * per_page).limit(per_page).all()
     data = []
     for r in rentals:
         data.append({
@@ -75,7 +72,7 @@ def get_rentals(project_name: str, page: int = Query(0, ge=0), per_page: int = Q
             "postal_district": r.postal_district,
             "size_band": r.size_band,
         })
-    return {"project_name": normalized_name, "total": total, "page": page, "per_page": per_page, "data": data}
+    return {"project_name": normalized_name, "total": total, "page": page, "per_page": per_page, "data": data, "rental_refresh": rental_refresh}
 
 
 @router.get("/{project_name}/analytics")
@@ -83,6 +80,7 @@ def get_analytics(project_name: str, force_refresh: bool = Query(False), db: Ses
     normalized_name = resolve_project_name(project_name, db)
     refresh = refresh_project_transactions(db, normalized_name, force=force_refresh)
     
+    rental_refresh = refresh_project_rentals(db, normalized_name, force=force_refresh)
     transactions = db.query(Transaction).filter(Transaction.project_name == normalized_name).all()
     rentals = db.query(Rental).filter(Rental.project_name == normalized_name).all()
     if not transactions and not rentals:
@@ -94,7 +92,7 @@ def get_analytics(project_name: str, force_refresh: bool = Query(False), db: Ses
     rental_trend = compute_monthly_rental_trend(rent_dicts)
     median_rent = compute_median_rent(rent_dicts)
     last_txn = get_last_transaction(txn_dicts)
-    return {"project_name": normalized_name, "summary": {"median_psf": psf_stats.get("median_psf"), "p25_psf": psf_stats.get("p25_psf"), "p75_psf": psf_stats.get("p75_psf"), "last_transaction_date": last_txn.get("sale_date_parsed") if last_txn else None, "last_transaction_price": last_txn.get("transacted_price") if last_txn else None, "last_transaction_psf": last_txn.get("price_psf") if last_txn else None, "total_transactions": len(transactions), "median_monthly_rent": median_rent, "total_rentals": len(rentals)}, "psf_trend": psf_trend, "rental_trend": rental_trend, "refresh": refresh}
+    return {"project_name": normalized_name, "summary": {"median_psf": psf_stats.get("median_psf"), "p25_psf": psf_stats.get("p25_psf"), "p75_psf": psf_stats.get("p75_psf"), "last_transaction_date": last_txn.get("sale_date_parsed") if last_txn else None, "last_transaction_price": last_txn.get("transacted_price") if last_txn else None, "last_transaction_psf": last_txn.get("price_psf") if last_txn else None, "total_transactions": len(transactions), "median_monthly_rent": median_rent, "total_rentals": len(rentals)}, "psf_trend": psf_trend, "rental_trend": rental_trend, "refresh": refresh, "rental_refresh": rental_refresh}
 
 
 @router.get("/{project_name}/yield")
