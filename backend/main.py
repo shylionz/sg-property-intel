@@ -18,10 +18,17 @@ from models.database import init_db, SessionLocal, Transaction, Rental
 from api import project, district
 from utils.project_index import search_projects as search_project_index, is_project_valid
 from scrapers.project_fetcher import fetch_project_data
+from utils.backup import ensure_rental_backup
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s")
 
-# Create database on startup
+# Back up a mounted production SQLite database before adding metadata tables or
+# serving any refresh request. On a fresh installation there is nothing to back up.
+backup_session = SessionLocal()
+try:
+    ensure_rental_backup(backup_session)
+finally:
+    backup_session.close()
 init_db()
 
 app = FastAPI(

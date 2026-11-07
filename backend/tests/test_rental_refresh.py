@@ -146,3 +146,30 @@ def test_backup_failure_prevents_replacement(db):
         assert refresh_project_rentals(db, 'THE ANCHORAGE')['status'] == 'failed'
     assert db.query(Rental).count() == 1
     assert db.query(Rental).one().lease_date_parsed.month == 4
+
+
+def test_new_install_has_no_database_to_back_up(tmp_path):
+    from utils.backup import ensure_rental_backup
+    engine = create_engine("sqlite:///" + str(tmp_path / "new.db"))
+    session = sessionmaker(bind=engine)()
+    assert ensure_rental_backup(session) is None
+    session.close(); engine.dispose()
+
+
+def test_startup_backs_up_before_adding_metadata_tables(tmp_path):
+    import os, sqlite3, subprocess
+    database = tmp_path / "existing.db"
+    with sqlite3.connect(database) as db:
+        db.execute("CREATE TABLE original_marker (value TEXT)")
+        db.execute("INSERT INTO original_marker VALUES ('preserve')")
+    env = dict(os.environ, DATABASE_URL="sqlite:///" + str(database))
+    result = subprocess.run([sys.executable, "-c", "import main"],
+                            cwd=Path(__file__).resolve().parents[1], env=env,
+                            capture_output=True, text=True, timeout=20)
+    assert result.returncode == 0, result.stderr
+    assert "integrity_check=ok" in result.stderr
+    with sqlite3.connect(tmp_path / ".backups/existing-before-rental-refresh-v1.db") as db:
+        assert db.execute("SELECT value FROM original_marker").fetchone()[0] == "preserve"
+        assert not db.execute("SELECT name FROM sqlite_master WHERE name='rental_refresh_status'").fetchall()
+    with sqlite3.connect(database) as db:
+        assert db.execute("SELECT name FROM sqlite_master WHERE name='rental_refresh_status'").fetchall()

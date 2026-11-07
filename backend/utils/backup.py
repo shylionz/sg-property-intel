@@ -1,5 +1,6 @@
 """Create a consistent, persistent SQLite backup before the first rental repair."""
 import fcntl
+import logging
 import os
 import sqlite3
 import tempfile
@@ -11,6 +12,8 @@ def ensure_rental_backup(db):
     if url.get_backend_name() != "sqlite" or not url.database or url.database == ":memory:":
         return None
     source = Path(url.database).resolve()
+    if not source.exists():
+        return None  # A new installation has no existing database to preserve.
     directory = source.parent / ".backups"
     directory.mkdir(mode=0o700, exist_ok=True)
     target = directory / (source.stem + "-before-rental-refresh-v1.db")
@@ -22,6 +25,7 @@ def ensure_rental_backup(db):
             with sqlite3.connect(str(target)) as backup:
                 if backup.execute("PRAGMA integrity_check").fetchone()[0] != "ok":
                     raise RuntimeError("Existing rental backup failed its integrity check")
+            logging.getLogger(__name__).info("Verified existing pre-repair SQLite backup: %s", target)
             return str(target)
         descriptor, temporary = tempfile.mkstemp(prefix="rental-backup-", suffix=".db", dir=directory)
         os.close(descriptor)
@@ -32,6 +36,7 @@ def ensure_rental_backup(db):
                     if backup.execute("PRAGMA integrity_check").fetchone()[0] != "ok":
                         raise RuntimeError("Rental backup failed its integrity check")
             os.replace(temporary, target)
+            logging.getLogger(__name__).info("Created and verified pre-repair SQLite backup: %s (integrity_check=ok)", target)
         finally:
             if os.path.exists(temporary):
                 os.unlink(temporary)
